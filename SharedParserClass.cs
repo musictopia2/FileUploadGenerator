@@ -34,6 +34,7 @@ internal class SharedParserClass(IEnumerable<ClassDeclarationSyntax> list, Compi
         {
             SharedResultsModel result = new();
             results.Add(result);
+            // Get the model type passed into Make<T>
             INamedTypeSymbol makeType = (INamedTypeSymbol)make.MethodSymbol.TypeArguments[0]!;
             result.ClassName = makeType.Name;
             result.Namespace = makeType.ContainingNamespace.ToDisplayString();
@@ -42,40 +43,65 @@ internal class SharedParserClass(IEnumerable<ClassDeclarationSyntax> list, Compi
             {
                 continue;
             }
+
             if (lambda.Body is not BlockSyntax lambdaBody)
             {
                 continue;
             }
+
             foreach (var statement in lambdaBody.Statements.OfType<ExpressionStatementSyntax>())
             {
                 if (statement.Expression is not InvocationExpressionSyntax invocation)
                 {
                     continue;
                 }
-                var symbolInfo = context.SemanticModel.GetSymbolInfo(invocation);
-                if (symbolInfo.Symbol is not IMethodSymbol methodSymbol || methodSymbol.Name != "SetUploadFile")
-                {
-                    continue;
-                }
 
-                var args = invocation.ArgumentList.Arguments;
-                if (args.Count < 3)
+                foreach (var setUploadCall in ExtractChainedSetUploadCalls(invocation, context))
                 {
-                    continue; // must have at least 3 arguments
-                }
+                    var args = setUploadCall.ArgumentList.Arguments;
+                    if (args.Count < 3)
+                    {
+                        continue;
+                    }
 
-                // Get property name from lambda
-                var lambdaExpr = args[0].Expression as SimpleLambdaExpressionSyntax;
-                var memberAccess = lambdaExpr?.Body as MemberAccessExpressionSyntax;
-                var propertyName = memberAccess?.Name.Identifier.Text ?? "";
-                var propertyInfo = new SharedPropertyInformation
-                {
-                    Name = propertyName,
-                    MaxSizeExpression = args[1].ToString(),
-                    ContentTypesExpression = args[2].ToString(),
-                    RequiredExpression = args.Count >= 4 ? args[3].ToString() : "true"
-                };
-                result.UploadedProperties.Add(propertyInfo);
+                    var lambdaExpr = args[0].Expression as SimpleLambdaExpressionSyntax;
+                    var memberAccess = lambdaExpr?.Body as MemberAccessExpressionSyntax;
+                    var propertyName = memberAccess?.Name.Identifier.Text ?? "";
+                    var propertyInfo = new SharedPropertyInformation
+                    {
+                        Name = propertyName,
+                        MaxSizeExpression = args[1].ToString(),
+                        ContentTypesExpression = args[2].ToString(),
+                        RequiredExpression = args.Count >= 4 ? args[3].ToString() : "true"
+                    };
+                    result.UploadedProperties.Add(propertyInfo);
+                }
+            }
+        }
+    }
+
+
+    private IEnumerable<InvocationExpressionSyntax> ExtractChainedSetUploadCalls(
+    InvocationExpressionSyntax rootInvocation,
+    ParseContext context)
+    {
+        var current = rootInvocation;
+        while (current != null)
+        {
+            var symbolInfo = context.SemanticModel.GetSymbolInfo(current);
+            if (symbolInfo.Symbol is IMethodSymbol methodSymbol && methodSymbol.Name == "SetUploadFile")
+            {
+                yield return current;
+            }
+
+            if (current.Expression is MemberAccessExpressionSyntax memberAccess &&
+                memberAccess.Expression is InvocationExpressionSyntax innerInvocation)
+            {
+                current = innerInvocation;
+            }
+            else
+            {
+                break;
             }
         }
     }
