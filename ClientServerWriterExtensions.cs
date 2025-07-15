@@ -190,13 +190,21 @@ internal static class ClientServerWriterExtensions
                           w.WriteLine($"""content.Add(new StringContent(model.{prop.PropertyName} ?? ""), "{prop.PropertyName}");""");
                       }
                   }
-
+                  bool hadError = false;
                   foreach (var prop in result.Properties)
                   {
                       if (prop.IsFile == true)
                       {
-                          w.WriteLine($"""if (!TryAddFileToContent("{prop.PropertyName}", registry, content, out var error))""")
-                           .WriteCodeBlock(w =>
+                          if (hadError == false)
+                          {
+                              w.WriteLine($"""if (!TryAddFileToContent("{prop.PropertyName}", registry, content, out var error))""");
+                              hadError = true;
+                          }
+                          else
+                          {
+                              w.WriteLine($"""if (!TryAddFileToContent("{prop.PropertyName}", registry, content, out error))""");
+                          }
+                          w.WriteCodeBlock(w =>
                            {
                                w.WriteLine("return (false, error ?? \"Unknown error\");");
                            });
